@@ -1,5 +1,3 @@
-"""End-to-end test validating the async metadata pipeline."""
-
 from __future__ import annotations
 
 import json
@@ -79,7 +77,6 @@ def test_pipeline_processes_images_and_is_idempotent() -> None:
 
     original_last_modified = head["LastModified"]
     upload_file_to_s3(bucket, TEST_IMAGE_KEY, image_path)
-    # ensure the queue event had a chance to be processed
     time.sleep(10)
     head_after = wait_for_s3_key(bucket, metadata_key, timeout_seconds=60)
     assert head_after["LastModified"] == original_last_modified
