@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: "Lab 3 - Asynchronous Serverless Image Metadata Pipeline (S3->Lambda->SQS->Lambda->S3)"
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 256
+    Tracing: Active
+
+Resources:
+  # S3 bucket (unique name using AccountId + Region)  [oai_citation:8‡Lab_3.pdf](sediment://file_0000000082a471f584a6051fe1c4bbdf)
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "coderoad-lab3-${AWS::AccountId}-${AWS::Region}"
+
+  # SQS queue as the sole decoupling mechanism  [oai_citation:9‡Lab_3.pdf](sediment://file_0000000082a471f584a6051fe1c4bbdf)
+  ImageQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 60
+
+  # Ingest Lambda: triggered ONLY by incoming/ and sends bucket/key/etag to SQS  [oai_citation:10‡Lab_3.pdf](sediment://file_0000000082a471f584a6051fe1c4bbdf)
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ingest/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref ImageQueue
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt ImageQueue.QueueName
+      Events:
+        S3IncomingEvent:
+          Type: S3
+          Properties:
+            Bucket: !Ref DataBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: incoming/
+
+  # Processor Lambda: consumes SQS, reads image from S3, writes metadata JSON to metadata/  [oai_citation:11‡Lab_3.pdf](sediment://file_0000000082a471f584a6051fe1c4bbdf)
+  ProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: processor/
+      Handler: app.lambda_handler
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref DataBucket
+          METADATA_PREFIX: metadata/
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref DataBucket
+        - S3WritePolicy:
+            BucketName: !Ref DataBucket
+        - SQSPollerPolicy:
+            QueueName: !GetAtt ImageQueue.QueueName
+      Events:
+        QueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ImageQueue.Arn
+            BatchSize: 5
+
+Outputs:
+  BucketName:
+    Value: !Ref DataBucket
+  QueueUrl:
+    Value: !Ref ImageQueue
